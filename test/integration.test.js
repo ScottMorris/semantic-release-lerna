@@ -1,25 +1,29 @@
+/* eslint-disable no-unused-vars -- Testing. */
 /* eslint-env jest */
 
-const { outputJson, readJson } = require("fs-extra");
-const execa = require("execa");
-const got = require("got");
-const tempy = require("tempy");
-const { WritableStreamBuffer } = require("stream-buffers");
-const npmRegistry = require("./helpers/npm-registry");
-const { createProject } = require("./helpers/project");
-const { createPackage } = require("./helpers/package");
+import { createRequire } from "node:module";
+import fse from "fs-extra";
+import { jest } from "@jest/globals";
+import execa from "execa";
+import got from "got";
+import { directory } from "tempy";
+import { WritableStreamBuffer } from "stream-buffers";
+import { url, authEnv, start, stop } from "./helpers/npm-registry.cjs";
+import createProject from "./helpers/project";
+import createPackage from "./helpers/package";
 
 let sut;
 let context;
+const require = createRequire(import.meta.url);
 
 async function initialPublish(cwd) {
 	await execa("git", ["tag", "v0.0.0"], { cwd });
 	await execa(
 		"lerna",
-		["publish", "from-package", "--yes", "--loglevel", "verbose", "--registry", npmRegistry.url()],
+		["publish", "from-package", "--yes", "--loglevel", "verbose", "--registry", url()],
 		{
 			cwd,
-			env: npmRegistry.authEnv,
+			env: authEnv,
 		}
 	);
 }
@@ -31,7 +35,7 @@ async function initialPublish(cwd) {
  * @returns {Promise<string[]>}
  */
 async function getPublishedVersions(pkg) {
-	const response = await got(`${npmRegistry.url()}/${pkg}`, {
+	const response = await got(`${url()}/${pkg}`, {
 		throwHttpErrors: false,
 		responseType: "json",
 	});
@@ -58,18 +62,19 @@ async function run(project, pluginConfig, options) {
 
 beforeAll(async () => {
 	// Start the local NPM registry
-	await npmRegistry.start();
+	await start();
 });
 
 afterAll(async () => {
 	// Stop the local NPM registry
-	await npmRegistry.stop();
+	await stop();
 });
 
-beforeEach(() => {
+beforeEach(async () => {
 	const log = jest.fn();
 	const warn = jest.fn();
-	sut = require("..");
+	// eslint-dis able-next-line node/no-unsuppo rted-features/es-syntax -- This is a feature
+	sut = await require("..");
 	context = {
 		log,
 		stdout: new WritableStreamBuffer(),
@@ -80,7 +85,7 @@ beforeEach(() => {
 
 it("should setup testable environment", async () => {
 	expect.assertions(7);
-	const cwd = tempy.directory();
+	const cwd = directory();
 	const project = await createProject(cwd, "0.0.0");
 	const foo = await createPackage(cwd, "test-initial-foo", "0.0.0");
 	const bar = await createPackage(cwd, "test-initial-bar", "0.0.0");
@@ -94,25 +99,27 @@ it("should setup testable environment", async () => {
 	expect(await getPublishedVersions(bar.name)).toEqual(["0.0.0"]);
 
 	/* Verify versions */
-	expect(await readJson(project.manifestLocation)).toEqual(
+	expect(await fse.readJson(project.manifestLocation)).toEqual(
 		expect.objectContaining({ version: "0.0.0" })
 	);
-	expect(await readJson(project.lernaPath)).toEqual(expect.objectContaining({ version: "0.0.0" }));
-	expect(await readJson(foo.manifestLocation)).toEqual({ name: foo.name, version: "0.0.0" });
-	expect(await readJson(bar.manifestLocation)).toEqual({ name: bar.name, version: "0.0.0" });
+	expect(await fse.readJson(project.lernaPath)).toEqual(
+		expect.objectContaining({ version: "0.0.0" })
+	);
+	expect(await fse.readJson(foo.manifestLocation)).toEqual({ name: foo.name, version: "0.0.0" });
+	expect(await fse.readJson(bar.manifestLocation)).toEqual({ name: bar.name, version: "0.0.0" });
 });
 
 it("should publish only changed packages", async () => {
 	expect.assertions(7);
-	const cwd = tempy.directory();
-	const env = npmRegistry.authEnv;
+	const cwd = directory();
+	const env = authEnv;
 	const project = await createProject(cwd, "0.0.0");
 	const foo = await createPackage(cwd, "test-single-foo", "0.0.0");
 	const bar = await createPackage(cwd, "test-single-bar", "0.0.0");
 	await initialPublish(cwd);
 
 	/* Make change to foo package */
-	await outputJson(foo.resolve("file.json"), { test: 1 });
+	await fse.outputJson(foo.resolve("file.json"), { test: 1 });
 	await project.commit("change foo");
 
 	/* Simulate semantic release */
@@ -133,25 +140,27 @@ it("should publish only changed packages", async () => {
 	expect(await getPublishedVersions(bar.name)).toEqual(["0.0.0"]);
 
 	/* Verify versions */
-	expect(await readJson(project.manifestLocation)).toEqual(
+	expect(await fse.readJson(project.manifestLocation)).toEqual(
 		expect.objectContaining({ version: "0.0.1" })
 	);
-	expect(await readJson(project.lernaPath)).toEqual(expect.objectContaining({ version: "0.0.1" }));
-	expect(await readJson(foo.manifestLocation)).toEqual({ name: foo.name, version: "0.0.1" });
-	expect(await readJson(bar.manifestLocation)).toEqual({ name: bar.name, version: "0.0.0" });
+	expect(await fse.readJson(project.lernaPath)).toEqual(
+		expect.objectContaining({ version: "0.0.1" })
+	);
+	expect(await fse.readJson(foo.manifestLocation)).toEqual({ name: foo.name, version: "0.0.1" });
+	expect(await fse.readJson(bar.manifestLocation)).toEqual({ name: bar.name, version: "0.0.0" });
 });
 
 it("should latch package versions", async () => {
 	expect.assertions(7);
-	const cwd = tempy.directory();
-	const env = npmRegistry.authEnv;
+	const cwd = directory();
+	const env = authEnv;
 	const project = await createProject(cwd, "0.0.0");
 	const foo = await createPackage(cwd, "test-latched-foo", "0.0.0");
 	const bar = await createPackage(cwd, "test-latched-bar", "0.0.0");
 	await initialPublish(cwd);
 
 	/* Make change to foo package */
-	await outputJson(foo.resolve("file.json"), { test: 1 });
+	await fse.outputJson(foo.resolve("file.json"), { test: 1 });
 	await project.commit("change foo");
 
 	/* Simulate semantic release */
@@ -172,18 +181,20 @@ it("should latch package versions", async () => {
 	expect(await getPublishedVersions(bar.name)).toEqual(["0.0.0", "0.1.0"]);
 
 	/* Verify versions */
-	expect(await readJson(project.manifestLocation)).toEqual(
+	expect(await fse.readJson(project.manifestLocation)).toEqual(
 		expect.objectContaining({ version: "0.1.0" })
 	);
-	expect(await readJson(project.lernaPath)).toEqual(expect.objectContaining({ version: "0.1.0" }));
-	expect(await readJson(foo.manifestLocation)).toEqual({ name: foo.name, version: "0.1.0" });
-	expect(await readJson(bar.manifestLocation)).toEqual({ name: bar.name, version: "0.1.0" });
+	expect(await fse.readJson(project.lernaPath)).toEqual(
+		expect.objectContaining({ version: "0.1.0" })
+	);
+	expect(await fse.readJson(foo.manifestLocation)).toEqual({ name: foo.name, version: "0.1.0" });
+	expect(await fse.readJson(bar.manifestLocation)).toEqual({ name: bar.name, version: "0.1.0" });
 });
 
 it("should publish depender packages when dependee changes", async () => {
 	expect.assertions(7);
-	const cwd = tempy.directory();
-	const env = npmRegistry.authEnv;
+	const cwd = directory();
+	const env = authEnv;
 	const project = await createProject(cwd, "0.0.0");
 	const foo = await createPackage(cwd, "test-dependant-foo", "0.0.0");
 	const bar = await createPackage(cwd, "test-dependant-bar", "0.0.0");
@@ -192,7 +203,7 @@ it("should publish depender packages when dependee changes", async () => {
 	await initialPublish(cwd);
 
 	/* Make change to foo package */
-	await outputJson(foo.resolve("file.json"), { test: 1 });
+	await fse.outputJson(foo.resolve("file.json"), { test: 1 });
 	await project.commit("change foo");
 
 	/* Simulate semantic release */
@@ -213,12 +224,14 @@ it("should publish depender packages when dependee changes", async () => {
 	expect(await getPublishedVersions(bar.name)).toEqual(["0.0.0", "0.1.0"]);
 
 	/* Verify versions */
-	expect(await readJson(project.manifestLocation)).toEqual(
+	expect(await fse.readJson(project.manifestLocation)).toEqual(
 		expect.objectContaining({ version: "0.1.0" })
 	);
-	expect(await readJson(project.lernaPath)).toEqual(expect.objectContaining({ version: "0.1.0" }));
-	expect(await readJson(foo.manifestLocation)).toEqual({ name: foo.name, version: "0.1.0" });
-	expect(await readJson(bar.manifestLocation)).toEqual({
+	expect(await fse.readJson(project.lernaPath)).toEqual(
+		expect.objectContaining({ version: "0.1.0" })
+	);
+	expect(await fse.readJson(foo.manifestLocation)).toEqual({ name: foo.name, version: "0.1.0" });
+	expect(await fse.readJson(bar.manifestLocation)).toEqual({
 		name: bar.name,
 		version: "0.1.0",
 		dependencies: {
@@ -229,14 +242,14 @@ it("should publish depender packages when dependee changes", async () => {
 
 it("should update package-lock.json in root", async () => {
 	expect.assertions(1);
-	const cwd = tempy.directory();
-	const env = npmRegistry.authEnv;
+	const cwd = directory();
+	const env = authEnv;
 	const project = await createProject(cwd, "0.0.0", { lockfile: true });
 	const foo = await createPackage(cwd, "test-root-lock-foo", "0.0.0");
 	await initialPublish(cwd);
 
 	/* Make change to foo package */
-	await outputJson(foo.resolve("file.json"), { test: 1 });
+	await fse.outputJson(foo.resolve("file.json"), { test: 1 });
 	await project.commit("change foo");
 
 	/* Simulate semantic release */
@@ -252,7 +265,7 @@ it("should update package-lock.json in root", async () => {
 	});
 
 	/* Verify versions */
-	expect(await readJson(project.lockfileLocation)).toMatchInlineSnapshot(`
+	expect(await fse.readJson(project.lockfileLocation)).toMatchInlineSnapshot(`
 		{
 		  "lockfileVersion": 2,
 		  "name": "root-pkg",
@@ -270,8 +283,8 @@ it("should update package-lock.json in root", async () => {
 
 it("should update package-lock.json in root with workspaces", async () => {
 	expect.assertions(1);
-	const cwd = tempy.directory();
-	const env = npmRegistry.authEnv;
+	const cwd = directory();
+	const env = authEnv;
 	const project = await createProject(cwd, "0.0.0", { lockfile: true, workspaces: true });
 	const foo = await createPackage(cwd, "test-root-workspace-foo", "0.0.0");
 	const bar = await createPackage(cwd, "test-root-workspace-bar", "0.0.0");
@@ -280,7 +293,7 @@ it("should update package-lock.json in root with workspaces", async () => {
 	await initialPublish(cwd);
 
 	/* Make change to foo package */
-	await outputJson(foo.resolve("file.json"), { test: 1 });
+	await fse.outputJson(foo.resolve("file.json"), { test: 1 });
 	await project.commit("change foo");
 
 	/* Simulate semantic release */
@@ -296,7 +309,7 @@ it("should update package-lock.json in root with workspaces", async () => {
 	});
 
 	/* Verify versions */
-	expect(await readJson(project.lockfileLocation)).toMatchInlineSnapshot(`
+	expect(await fse.readJson(project.lockfileLocation)).toMatchInlineSnapshot(`
 		{
 		  "dependencies": {
 		    "test-root-workspace-bar": {
@@ -345,22 +358,22 @@ it("should update package-lock.json in root with workspaces", async () => {
 
 it("should generate release notes", async () => {
 	expect.assertions(1);
-	const cwd = tempy.directory();
-	const env = npmRegistry.authEnv;
+	const cwd = directory();
+	const env = authEnv;
 	const project = await createProject(cwd, "0.0.0");
 	const foo = await createPackage(cwd, "test-release-notes-foo", "0.0.0");
 	const bar = await createPackage(cwd, "test-release-notes-bar", "0.0.0");
 	await initialPublish(cwd);
 
 	/* Make some changes */
-	await outputJson(foo.resolve("file.json"), { test: 1 });
+	await fse.outputJson(foo.resolve("file.json"), { test: 1 });
 	const fooCommit = await project.commit("feat: change foo");
-	await outputJson(project.resolve("other.json"), { test: 1 });
+	await fse.outputJson(project.resolve("other.json"), { test: 1 });
 	const rootCommit = await project.commit("fix: fix bug");
-	await outputJson(bar.resolve("file.json"), { test: 1 });
+	await fse.outputJson(bar.resolve("file.json"), { test: 1 });
 	const barCommit = await project.commit("fix: another bug fixed");
-	await outputJson(foo.resolve("file.json"), { test: 2 });
-	await outputJson(bar.resolve("file.json"), { test: 2 });
+	await fse.outputJson(foo.resolve("file.json"), { test: 2 });
+	await fse.outputJson(bar.resolve("file.json"), { test: 2 });
 	const sharedCommit = await project.commit("fix: fixed bug across two packages");
 
 	/* Simulate semantic release */
@@ -411,22 +424,22 @@ it("should generate release notes", async () => {
 
 it("should skip private packages in release notes", async () => {
 	expect.assertions(1);
-	const cwd = tempy.directory();
-	const env = npmRegistry.authEnv;
+	const cwd = directory();
+	const env = authEnv;
 	const project = await createProject(cwd, "0.0.0");
 	const foo = await createPackage(cwd, "test-skip-private-foo", "0.0.0");
 	const bar = await createPackage(cwd, "test-skip-private-bar", "0.0.0", { private: true });
 	await initialPublish(cwd);
 
 	/* Make some changes */
-	await outputJson(foo.resolve("file.json"), { test: 1 });
+	await fse.outputJson(foo.resolve("file.json"), { test: 1 });
 	const fooCommit = await project.commit("feat: change foo");
-	await outputJson(project.resolve("other.json"), { test: 1 });
+	await fse.outputJson(project.resolve("other.json"), { test: 1 });
 	const rootCommit = await project.commit("fix: fix bug");
-	await outputJson(bar.resolve("file.json"), { test: 1 });
+	await fse.outputJson(bar.resolve("file.json"), { test: 1 });
 	const barCommit = await project.commit("fix: another bug fixed");
-	await outputJson(foo.resolve("file.json"), { test: 2 });
-	await outputJson(bar.resolve("file.json"), { test: 2 });
+	await fse.outputJson(foo.resolve("file.json"), { test: 2 });
+	await fse.outputJson(bar.resolve("file.json"), { test: 2 });
 	const sharedCommit = await project.commit("fix: fixed bug across two packages");
 
 	/* Simulate semantic release */
